@@ -766,7 +766,7 @@ describe("OpenAI-compatible HTTP API (e2e)", () => {
           (c) => (c.choices as Array<Record<string, unknown>> | undefined) ?? [],
         );
         const middleChunks = allChoices.filter((choice) => choice.finish_reason === undefined);
-        const lastChunk = allChoices.find((choice) => choice.finish_reason === "stop");
+        const lastChunk = allChoices.findLast((choice) => choice.finish_reason === "stop");
         // Middle chunks should NOT have finish_reason
         for (const chunk of middleChunks) {
           expect(chunk).not.toHaveProperty("finish_reason");
