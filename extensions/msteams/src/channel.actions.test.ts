@@ -1,4 +1,6 @@
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { msteamsActionsAdapter } from "./actions.js";
 
 const {
   editMessageMSTeamsMock,
@@ -9,6 +11,7 @@ const {
   reactMessageMSTeamsMock,
   searchMessagesMSTeamsMock,
   sendAdaptiveCardMSTeamsMock,
+  sendMessageMSTeamsMock,
   unpinMessageMSTeamsMock,
 } = vi.hoisted(() => ({
   editMessageMSTeamsMock: vi.fn(),
@@ -19,6 +22,7 @@ const {
   reactMessageMSTeamsMock: vi.fn(),
   searchMessagesMSTeamsMock: vi.fn(),
   sendAdaptiveCardMSTeamsMock: vi.fn(),
+  sendMessageMSTeamsMock: vi.fn(),
   unpinMessageMSTeamsMock: vi.fn(),
 }));
 
@@ -32,11 +36,10 @@ vi.mock("./channel.runtime.js", () => ({
     reactMessageMSTeams: reactMessageMSTeamsMock,
     searchMessagesMSTeams: searchMessagesMSTeamsMock,
     sendAdaptiveCardMSTeams: sendAdaptiveCardMSTeamsMock,
+    sendMessageMSTeams: sendMessageMSTeamsMock,
     unpinMessageMSTeams: unpinMessageMSTeamsMock,
   },
 }));
-
-import { msteamsPlugin } from "./channel.js";
 
 const actionMocks = [
   editMessageMSTeamsMock,
@@ -47,6 +50,7 @@ const actionMocks = [
   reactMessageMSTeamsMock,
   searchMessagesMSTeamsMock,
   sendAdaptiveCardMSTeamsMock,
+  sendMessageMSTeamsMock,
   unpinMessageMSTeamsMock,
 ];
 const currentChannelId = "conversation:19:ctx@thread.tacv2";
@@ -83,7 +87,7 @@ function okMSTeamsActionDetails(action: string, details?: Record<string, unknown
 }
 
 function requireMSTeamsHandleAction() {
-  const handleAction = msteamsPlugin.actions?.handleAction;
+  const handleAction = msteamsActionsAdapter.handleAction;
   if (!handleAction) {
     throw new Error("msteams actions.handleAction unavailable");
   }
@@ -95,6 +99,7 @@ async function runAction(params: {
   cfg?: Record<string, unknown>;
   params?: Record<string, unknown>;
   toolContext?: Record<string, unknown>;
+  mediaLocalRoots?: readonly string[];
 }) {
   const handleAction = requireMSTeamsHandleAction();
   return await handleAction({
@@ -102,8 +107,9 @@ async function runAction(params: {
     action: params.action,
     cfg: params.cfg ?? {},
     params: params.params ?? {},
+    mediaLocalRoots: params.mediaLocalRoots,
     toolContext: params.toolContext,
-  } as any);
+  } as Parameters<ReturnType<typeof requireMSTeamsHandleAction>>[0]);
 }
 
 async function expectActionError(
@@ -159,6 +165,7 @@ async function expectSuccessfulAction(params: {
   action: Parameters<typeof runAction>[0]["action"];
   actionParams?: Parameters<typeof runAction>[0]["params"];
   toolContext?: Parameters<typeof runAction>[0]["toolContext"];
+  mediaLocalRoots?: Parameters<typeof runAction>[0]["mediaLocalRoots"];
   runtimeParams: Record<string, unknown>;
   details: Record<string, unknown>;
   contentDetails?: Record<string, unknown>;
@@ -167,6 +174,7 @@ async function expectSuccessfulAction(params: {
   const result = await runAction({
     action: params.action,
     params: params.actionParams,
+    mediaLocalRoots: params.mediaLocalRoots,
     toolContext: params.toolContext,
   });
   expectActionRuntimeCall(params.mockFn, params.runtimeParams);
@@ -203,6 +211,59 @@ describe("msteamsPlugin message actions", () => {
         channel: "msteams",
         action: "read",
         message: readMessage,
+      },
+    });
+  });
+
+  it("advertises upload-file in the message tool surface", () => {
+    expect(
+      msteamsActionsAdapter.describeMessageTool?.({
+        cfg: {
+          channels: {
+            msteams: {
+              appId: "app-id",
+              appPassword: "secret",
+              tenantId: "tenant-id",
+            },
+          },
+        } as OpenClawConfig,
+      })?.actions,
+    ).toContain("upload-file");
+  });
+
+  it("routes upload-file through sendMessageMSTeams with filename override", async () => {
+    await expectSuccessfulAction({
+      mockFn: sendMessageMSTeamsMock,
+      mockResult: {
+        messageId: "msg-upload-1",
+        conversationId: "conv-upload-1",
+      },
+      action: "upload-file",
+      actionParams: {
+        target: padded(targetChannelId),
+        path: " /tmp/report.pdf ",
+        message: "Quarterly report",
+        filename: "Q1-report.pdf",
+      },
+      mediaLocalRoots: ["/tmp"],
+      runtimeParams: {
+        to: targetChannelId,
+        text: "Quarterly report",
+        mediaUrl: " /tmp/report.pdf ",
+        filename: "Q1-report.pdf",
+        mediaLocalRoots: ["/tmp"],
+      },
+      details: {
+        ok: true,
+        channel: "msteams",
+        messageId: "msg-upload-1",
+      },
+      contentDetails: {
+        ok: true,
+        channel: "msteams",
+        action: "upload-file",
+        messageId: "msg-upload-1",
+        conversationId: "conv-upload-1",
       },
     });
   });
